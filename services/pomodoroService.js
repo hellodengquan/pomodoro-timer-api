@@ -215,7 +215,7 @@ function createPomodoroService(db) {
   }
 
   function getStatsByTag(options = {}) {
-    const { startDate, endDate } = options;
+    const { startDate, endDate, limit = 50, offset = 0 } = options;
     let query = `
       SELECT 
         tag,
@@ -239,7 +239,8 @@ function createPomodoroService(db) {
       params.push(endDate);
     }
 
-    query += ' GROUP BY tag ORDER BY total_duration_seconds DESC';
+    query += ' GROUP BY tag ORDER BY total_duration_seconds DESC, tag ASC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
 
     const stmt = db.prepare(query);
     return stmt.all(...params);
