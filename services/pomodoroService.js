@@ -220,11 +220,11 @@ function createPomodoroService(db) {
       SELECT 
         tag,
         COUNT(*) as total_count,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
-        SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END) as interrupted_count,
-        SUM(actual_duration) as total_duration_seconds,
-        SUM(CASE WHEN status = 'completed' THEN actual_duration ELSE 0 END) as completed_duration_seconds,
-        SUM(total_paused_duration) as total_paused_duration_seconds
+        COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed_count,
+        COALESCE(SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END), 0) as interrupted_count,
+        COALESCE(SUM(actual_duration), 0) as total_duration_seconds,
+        COALESCE(SUM(CASE WHEN status = 'completed' THEN actual_duration ELSE 0 END), 0) as completed_duration_seconds,
+        COALESCE(SUM(total_paused_duration), 0) as total_paused_duration_seconds
       FROM pomodoros
       WHERE tag IS NOT NULL AND status IN ('completed', 'interrupted')
     `;
@@ -250,13 +250,13 @@ function createPomodoroService(db) {
     let query = `
       SELECT 
         COUNT(*) as total_count,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
-        SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END) as interrupted_count,
-        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_count,
-        SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END) as paused_count,
-        SUM(actual_duration) as total_duration_seconds,
-        SUM(CASE WHEN status = 'completed' THEN actual_duration ELSE 0 END) as completed_duration_seconds,
-        SUM(total_paused_duration) as total_paused_duration_seconds
+        COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed_count,
+        COALESCE(SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END), 0) as interrupted_count,
+        COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) as running_count,
+        COALESCE(SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END), 0) as paused_count,
+        COALESCE(SUM(actual_duration), 0) as total_duration_seconds,
+        COALESCE(SUM(CASE WHEN status = 'completed' THEN actual_duration ELSE 0 END), 0) as completed_duration_seconds,
+        COALESCE(SUM(total_paused_duration), 0) as total_paused_duration_seconds
       FROM pomodoros
       WHERE 1=1
     `;
