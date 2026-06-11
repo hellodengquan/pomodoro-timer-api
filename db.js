@@ -54,9 +54,48 @@ const EventType = {
   COMPLETE: 'complete'
 };
 
+const STATE_TRANSITIONS = {
+  [PomodoroStatus.IDLE]: {
+    [EventType.START]: PomodoroStatus.RUNNING
+  },
+  [PomodoroStatus.RUNNING]: {
+    [EventType.PAUSE]: PomodoroStatus.PAUSED,
+    [EventType.COMPLETE]: PomodoroStatus.COMPLETED,
+    [EventType.INTERRUPT]: PomodoroStatus.INTERRUPTED
+  },
+  [PomodoroStatus.PAUSED]: {
+    [EventType.RESUME]: PomodoroStatus.RUNNING,
+    [EventType.INTERRUPT]: PomodoroStatus.INTERRUPTED
+  },
+  [PomodoroStatus.COMPLETED]: {},
+  [PomodoroStatus.INTERRUPTED]: {}
+};
+
+function isTransitionAllowed(currentStatus, eventType) {
+  const transitions = STATE_TRANSITIONS[currentStatus];
+  if (!transitions) return false;
+  return eventType in transitions;
+}
+
+function getTargetStatus(currentStatus, eventType) {
+  const transitions = STATE_TRANSITIONS[currentStatus];
+  if (!transitions) return null;
+  return transitions[eventType] || null;
+}
+
+function getAllowedActions(status) {
+  const transitions = STATE_TRANSITIONS[status];
+  if (!transitions) return [];
+  return Object.keys(transitions);
+}
+
 module.exports = {
   db,
   initDatabase,
   PomodoroStatus,
-  EventType
+  EventType,
+  STATE_TRANSITIONS,
+  isTransitionAllowed,
+  getTargetStatus,
+  getAllowedActions
 };

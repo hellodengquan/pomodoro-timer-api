@@ -1,4 +1,5 @@
-const { db, PomodoroStatus, EventType } = require('../db');
+const { db, PomodoroStatus, EventType, isTransitionAllowed, getTargetStatus, getAllowedActions } = require('../db');
+const { StateTransitionError, NotFoundError } = require('../errors');
 
 function getCurrentTime() {
   return new Date().toISOString();
@@ -8,6 +9,27 @@ function getTimeDiffInSeconds(time1, time2) {
   const t1 = new Date(time1).getTime();
   const t2 = new Date(time2).getTime();
   return Math.floor((t2 - t1) / 1000);
+}
+
+function requirePomodoroExists(id) {
+  const stmt = db.prepare('SELECT * FROM pomodoros WHERE id = ?');
+  const pomodoro = stmt.get(id);
+  if (!pomodoro) {
+    throw new NotFoundError('番茄钟不存在');
+  }
+  return pomodoro;
+}
+
+function requireTransition(pomodoro, eventType) {
+  if (!isTransitionAllowed(pomodoro.status, eventType)) {
+    throw new StateTransitionError(
+      `不允许从 '${pomodoro.status}' 状态执行 '${eventType}' 操作`,
+      pomodoro.status,
+      eventType,
+      getAllowedActions(pomodoro.status)
+    );
+  }
+  return getTargetStatus(pomodoro.status, eventType);
 }
 
 function createPomodoro(title, tag, duration = 1500) {
@@ -69,44 +91,17 @@ function calculateActualDuration(pomodoro) {
 }
 
 function startPomodoro(id) {
-  const pomodoro = getPomodoroById(id);
-  if (!pomodoro) {
-    throw new Error('番茄钟不存在');
-  }
+  const pomodoro = requirePomodoroExists(id);
+  requireTransition(pomodoro, EventType.START);
 
-  if (pomodoro.status === PomodoroStatus.RUNNING) {
-    throw new Error('番茄钟已经在运行中');
-  }
-
-  if (pomodoro.status === PomodoroStatus.COMPLETED || pomodoro.status === PomodoroStatus.INTERRUPTED) {
-    throw new Error('已结束的番茄钟无法重新开始');
-  }
-
-  const isResume = pomodoro.status === PomodoroStatus.PAUSED;
   const now = getCurrentTime();
-
-  if (isResume) {
-    const lastPauseEvent = getLastPauseEvent(id);
-    if (lastPauseEvent) {
-      const pausedDuration = getTimeDiffInSeconds(lastPauseEvent.event_time, now);
-      const stmt = db.prepare(`
-        UPDATE pomodoros
-        SET status = ?, total_paused_duration = total_paused_duration + ?
-        WHERE id = ?
-      `);
-      stmt.run(PomodoroStatus.RUNNING, pausedDuration, id);
-    }
-    addEvent(id, EventType.RESUME);
-  } else {
-    const now = getCurrentTime();
-    const stmt = db.prepare(`
-      UPDATE pomodoros
-      SET status = ?, started_at = ?
-      WHERE id = ?
-    `);
-    stmt.run(PomodoroStatus.RUNNING, now, id);
-    addEvent(id, EventType.START);
-  }
+  const stmt = db.prepare(`
+    UPDATE pomodoros
+    SET status = ?, started_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(PomodoroStatus.RUNNING, now, id);
+  addEvent(id, EventType.START);
 
   return getPomodoroById(id);
 }
@@ -122,14 +117,8 @@ function getLastPauseEvent(pomodoroId) {
 }
 
 function pausePomodoro(id, note = null) {
-  const pomodoro = getPomodoroById(id);
-  if (!pomodoro) {
-    throw new Error('番茄钟不存在');
-  }
-
-  if (pomodoro.status !== PomodoroStatus.RUNNING) {
-    throw new Error('只有运行中的番茄钟才能暂停');
-  }
+  const pomodoro = requirePomodoroExists(id);
+  requireTransition(pomodoro, EventType.PAUSE);
 
   const stmt = db.prepare(`
     UPDATE pomodoros
@@ -144,22 +133,36 @@ function pausePomodoro(id, note = null) {
 }
 
 function resumePomodoro(id) {
-  return startPomodoro(id);
+  const pomodoro = requirePomodoroExists(id);
+  requireTransition(pomodoro, EventType.RESUME);
+
+  const now = getCurrentTime();
+  const lastPauseEvent = getLastPauseEvent(id);
+  if (lastPauseEvent) {
+    const pausedDuration = getTimeDiffInSeconds(lastPauseEvent.event_time, now);
+    const stmt = db.prepare(`
+      UPDATE pomodoros
+      SET status = ?, total_paused_duration = total_paused_duration + ?
+      WHERE id = ?
+    `);
+    stmt.run(PomodoroStatus.RUNNING, pausedDuration, id);
+  } else {
+    const stmt = db.prepare(`
+      UPDATE pomodoros
+      SET status = ?
+      WHERE id = ?
+    `);
+    stmt.run(PomodoroStatus.RUNNING, id);
+  }
+
+  addEvent(id, EventType.RESUME);
+
+  return getPomodoroById(id);
 }
 
 function interruptPomodoro(id, note = null) {
-  const pomodoro = getPomodoroById(id);
-  if (!pomodoro) {
-    throw new Error('番茄钟不存在');
-  }
-
-  if (pomodoro.status === PomodoroStatus.COMPLETED || pomodoro.status === PomodoroStatus.INTERRUPTED) {
-    throw new Error('番茄钟已经结束');
-  }
-
-  if (pomodoro.status === PomodoroStatus.IDLE) {
-    throw new Error('未开始的番茄钟无法中断');
-  }
+  const pomodoro = requirePomodoroExists(id);
+  requireTransition(pomodoro, EventType.INTERRUPT);
 
   const now = getCurrentTime();
   const actualDuration = calculateActualDuration({
@@ -180,18 +183,8 @@ function interruptPomodoro(id, note = null) {
 }
 
 function completePomodoro(id) {
-  const pomodoro = getPomodoroById(id);
-  if (!pomodoro) {
-    throw new Error('番茄钟不存在');
-  }
-
-  if (pomodoro.status === PomodoroStatus.COMPLETED || pomodoro.status === PomodoroStatus.INTERRUPTED) {
-    throw new Error('番茄钟已经结束');
-  }
-
-  if (pomodoro.status === PomodoroStatus.IDLE) {
-    throw new Error('未开始的番茄钟无法完成');
-  }
+  const pomodoro = requirePomodoroExists(id);
+  requireTransition(pomodoro, EventType.COMPLETE);
 
   const now = getCurrentTime();
   const actualDuration = calculateActualDuration({
@@ -212,10 +205,7 @@ function completePomodoro(id) {
 }
 
 function deletePomodoro(id) {
-  const pomodoro = getPomodoroById(id);
-  if (!pomodoro) {
-    throw new Error('番茄钟不存在');
-  }
+  const pomodoro = requirePomodoroExists(id);
 
   const stmt = db.prepare('DELETE FROM pomodoros WHERE id = ?');
   stmt.run(id);
